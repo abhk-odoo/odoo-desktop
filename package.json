@@ -1,0 +1,71 @@
+{
+  "name": "odoo_desktop",
+  "version": "1.0.0",
+  "productName": "Odoo Desktop",
+  "description": "A full desktop application for accessing Odoo in a secure and native environment",
+  "license": "ISC",
+  "type": "module",
+  "main": "app/main/main.js",
+  "author": {
+    "name": "Odoo S.A.",
+    "email": "support@odoo.com"
+  },
+  "scripts": {
+    "start": "electron .",
+    "clean": "rimraf build dist server/build server/main.spec server/__pycache__",
+    "build-python-win": "cd server && pip install -r requirements.txt && pyinstaller --onefile --add-data \"ddl_path.py;.\" --add-data \"libusb;libusb\" --collect-data=escpos --name main --distpath ../build/win-x64 main.py",
+    "build-python-linux": "cd server && pip install -r requirements.txt && pyinstaller --onefile --add-data \"ddl_path.py:.\" --add-data \"libusb:libusb\" --collect-data=escpos --name main --distpath ../build/linux-x64 main.py",
+    "build-electron-win": "electron-builder --win nsis",
+    "build-electron-linux": "electron-builder --linux deb",
+    "build-win": "npm run clean && npm run build-python-win && npm run build-electron-win",
+    "build-linux": "npm run clean && npm run build-python-linux && npm run build-electron-linux"
+  },
+  "build": {
+    "appId": "com.odoo.desktop",
+    "productName": "Odoo Desktop",
+    "icon": "app/assets/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build",
+        "to": "build"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Business"
+    }
+  },
+  "devDependencies": {
+    "electron": "^39.2.2",
+    "electron-builder": "^26.0.12",
+    "rimraf": "^6.1.0"
+  },
+  "dependencies": {
+    "electron-store": "^11.0.2"
+  }
+}

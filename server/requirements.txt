@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pydantic
+pyinstaller
+python-escpos
+pyusb
