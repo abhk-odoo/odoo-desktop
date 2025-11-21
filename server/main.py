@@ -10,7 +10,6 @@ from threading import Thread
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from escpos.printer import Usb
 from ddl_path import load_libusb_backend
 
 backend = load_libusb_backend()
@@ -71,38 +70,53 @@ def printer_worker():
             print_queue.task_done()
 
 def handle_print_job(data: PrintRequest):
-    """Handles the actual raster print job sent to the ESC/POS printer."""
-    printer = None
+    """Handles the raster print job using direct USB write (Epson style)."""
     try:
         raster_bytes = base64.b64decode(data.raster_base64)
+        width = data.width
+        height = data.height
+
+        bytes_per_row = (width + 7) // 8
+
+        esc = b"\x1b@"  # init
+
+        header = (
+            b"\x1d\x76\x30\x00"
+            + bytes([bytes_per_row & 0xFF, (bytes_per_row >> 8) & 0xFF])
+            + bytes([height & 0xFF, (height >> 8) & 0xFF])
+        )
+        esc += header + raster_bytes
+        esc += b"\n"
+        esc += b"\x1dV\x00"   # cut
+
+        if data.cash_drawer:
+            esc += b"\x1bp\x02\x40\x50"
+
         vendor_id = int(data.vendor_id, 16)
         product_id = int(data.product_id, 16)
 
-        printer = Usb(vendor_id, product_id)
+        dev = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=load_libusb_backend())
+        if dev is None:
+            raise Exception("Printer not found.")
 
-        printer._raw(b'\x1b@')
-        bytes_per_row = (data.width + 7) // 8
-        header = b'\x1dv0\x00' + \
-                 bytes([bytes_per_row % 256, bytes_per_row // 256]) + \
-                 bytes([data.height % 256, data.height // 256])
-        printer._raw(header + raster_bytes)
-        printer._raw(b'\n' * 1) 
-        printer.cut()
-        if data.cash_drawer:
-            printer.cashdraw(2)
+        # detach kernel driver
+        try:
+            if dev.is_kernel_driver_active(0):
+                dev.detach_kernel_driver(0)
+        except:
+            pass
 
-    except usb.core.NoBackendError:
-        logger.error("[ERROR] USB backend not available. Install libusb driver (use Zadig on Windows). See WINDOWS_USB_SETUP.md")
-    except usb.core.USBError as e:
-        logger.error(f"[ERROR] USB error during print: {e}. Check if printer is connected and drivers are installed.")
+        usb.util.claim_interface(dev, 0)
+
+        EP_OUT = 0x01  # Most ESC/POS printers
+
+        dev.write(EP_OUT, esc, timeout=5000)
+
+        usb.util.release_interface(dev, 0)
+        dev.reset()
+
     except Exception as e:
         logger.error(f"[ERROR] Print job error: {e}")
-    finally:
-        if printer:
-            try:
-                printer.close()
-            except:
-                pass
 
 @app.post("/print")
 def print_receipt(data: PrintRequest):
