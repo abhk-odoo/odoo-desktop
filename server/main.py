@@ -17,8 +17,6 @@ backend = load_libusb_backend()
 # Use backend to find devices
 if backend is not None:
     devices = usb.core.find(find_all=True, backend=backend)
-    for dev in devices:
-        print(f"Found USB device: VID=0x{dev.idVendor:04x}, PID=0x{dev.idProduct:04x}")
 else:
     print("[ERROR] libusb backend could not be initialized.")
 
@@ -72,26 +70,49 @@ def printer_worker():
 def handle_print_job(data: PrintRequest):
     """Handles the raster print job using direct USB write (Epson style)."""
     try:
+        # Decode raster image
         raster_bytes = base64.b64decode(data.raster_base64)
+
         width = data.width
         height = data.height
 
-        bytes_per_row = (width + 7) // 8
+        if width % 8 != 0:
+            width += 8 - (width % 8)
 
-        esc = b"\x1b@"  # init
+        bytes_per_row = width // 8
+
+        esc = b"\x1b@"
+
+        esc += b"\x1b\x61\x01"
+
+        left_margin = 40  # adjust if needed
+        esc += b"\x1b\x6c" + bytes([
+            left_margin & 0xFF,
+            (left_margin >> 8) & 0xFF
+        ])
 
         header = (
             b"\x1d\x76\x30\x00"
             + bytes([bytes_per_row & 0xFF, (bytes_per_row >> 8) & 0xFF])
             + bytes([height & 0xFF, (height >> 8) & 0xFF])
         )
-        esc += header + raster_bytes
-        esc += b"\n"
-        esc += b"\x1dV\x00"   # cut
 
+        esc += header + raster_bytes
+
+        # ---- Add bottom padding ----
+        BOTTOM_PADDING = 200  # pixels
+        empty_row = b"\x00" * bytes_per_row
+        esc += empty_row * BOTTOM_PADDING
+
+        # ---- Cut paper ----
+        esc += b"\n"
+        esc += b"\x1dV\x00"  # full cut
+
+        # ---- Cash drawer (optional) ----
         if data.cash_drawer:
             esc += b"\x1bp\x02\x40\x50"
 
+        # ---- Locate printer ----
         vendor_id = int(data.vendor_id, 16)
         product_id = int(data.product_id, 16)
 
@@ -99,19 +120,20 @@ def handle_print_job(data: PrintRequest):
         if dev is None:
             raise Exception("Printer not found.")
 
-        # detach kernel driver
+        # ---- Detach kernel driver (Linux) ----
         try:
             if dev.is_kernel_driver_active(0):
                 dev.detach_kernel_driver(0)
-        except:
+        except Exception:
             pass
 
         usb.util.claim_interface(dev, 0)
 
-        EP_OUT = 0x01  # Most ESC/POS printers
+        EP_OUT = 0x01  # most thermal printers use endpoint 1
 
         dev.write(EP_OUT, esc, timeout=5000)
 
+        # ---- Cleanup ----
         usb.util.release_interface(dev, 0)
         dev.reset()
 
@@ -124,55 +146,91 @@ def print_receipt(data: PrintRequest):
     print_queue.put(data)
     return {"status": True, "message": "Print job queued."}
 
-@app.get("/printer")
-def list_usb_printers():
-    """Returns the first detected USB ESC/POS printer."""
-    try:
-        devices = usb.core.find(find_all=True)
-    except usb.core.NoBackendError:
-        return {
-            "status": False,
-            "error": "usb_driver_missing",
-            "message": "USB driver not found. On Windows, install libusb driver using Zadig. See WINDOWS_USB_SETUP.md for instructions."
-        }
-    except Exception as e:
-        logger.error(f"Error accessing USB devices: {e}")
-        return {
-            "status": False,
-            "error": "usb_access_error",
-            "message": f"Failed to access USB devices: {str(e)}"
-        }
-    
+EPOS_PRINTERS = {
+    0x4b43: "Caysn",
+    0x0fe6: "RuGtek or Xprinter",
+    0x04b8: "EPSON",
+    0x1504: "BIXOLON",
+    0x0416: "Winbond",
+    0x1fc9: "POSBANK",
+    0x0519: "Star Micronics",
+}
+
+SYSTEM_USB_KEYWORDS = {
+    "linux", "xhci-hcd", "ehci-hcd", "root hub", "usb hub",
+    "microsoft", "standard usb host controller", "usb root hub",
+    "generic usb hub",
+    "apple", "usb host controller", "usb high-speed bus"
+}
+
+KEYWORDS = ["printer", "thermal", "receipt", "pos", "rugtek", "xprinter"]
+
+def is_system_usb_device(manufacturer, product):
+    m = manufacturer.lower()
+    p = product.lower()
+    return any(k in m or k in p for k in SYSTEM_USB_KEYWORDS)
+
+def list_known_epos_printers(known=True):
+    devices = usb.core.find(find_all=True)
+    printers = []
+
     for device in devices:
         try:
-            vendor_id = device.idVendor
-            product_id = device.idProduct
+            vid = device.idVendor
+            pid = device.idProduct
 
-            # Optionally skip devices that are not likely printers
-            if device.bDeviceClass not in (0, 7):
-                continue
+            is_known_vendor = vid in EPOS_PRINTERS
+            is_printer_interface = False
+
+            for cfg in device:
+                for intf in cfg:
+                    if intf.bInterfaceClass == 0x07:
+                        is_printer_interface = True
+                        break
+                if is_printer_interface:
+                    break
 
             manufacturer = usb.util.get_string(device, device.iManufacturer) or "Unknown"
             product = usb.util.get_string(device, device.iProduct) or "Unknown"
+            name_combined = f"{manufacturer} {product}".lower()
 
-            return {
-                "status": True,
-                "printer": {
-                    "vendor_id": f"{vendor_id:04x}",
-                    "product_id": f"{product_id:04x}",
-                    "manufacturer": manufacturer,
-                    "product": product,
-                }
-            }
+            if is_system_usb_device(manufacturer, product):
+                continue
 
-        except usb.core.USBError as e:
-            logger.warning(f"USB access error for device: {e}")
-            continue
+            has_keyword_match = any(keyword in name_combined for keyword in KEYWORDS)
+
+            if known and not is_known_vendor:
+                continue
+            elif known and not (is_known_vendor or is_printer_interface or has_keyword_match):
+                continue
+
+            printers.append({
+                "vendor_id": f"{vid:04x}",
+                "product_id": f"{pid:04x}",
+                "manufacturer": manufacturer,
+                "vendor_name": EPOS_PRINTERS.get(vid, "Unknown"),
+                "product": product,
+                "matched_by": (
+                    "No Filter Applied" if known == False else
+                    "Vendor id" if is_known_vendor else
+                    "Interface class" if is_printer_interface else
+                    "Name keyword"
+                ),
+            })
+
         except Exception as e:
-            logger.warning(f"Error getting USB printer info: {e}")
+            logger.warning(f"Error reading device info: {e}")
             continue
 
-    return {"status": False, "message": "No USB printers found"}
+    return printers
+
+@app.get("/printer")
+def list_usb_printers():
+    """Returns the list of detected printers."""
+    printers = list_known_epos_printers(known=True)
+    if printers:
+        return {"status": True, "printer": printers[0]}
+    return {"status": False, "message": "No ESC/POS printers found"}
 
 worker_thread = Thread(target=printer_worker, daemon=True)
 worker_thread.start()

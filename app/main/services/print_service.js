@@ -20,29 +20,63 @@ export default class PrintService {
      */
     async start() {
         const isDev = !app.isPackaged;
-        const binaryName = process.platform === 'win32' ? 'main.exe' : 'main';
         
-        // Determine the platform-specific build path
-        const platformDir = process.platform === 'win32' ? 'win-x64' : 'linux-x64';
-        
-        let buildOutputPath;
         if (isDev) {
-            // Development mode - look in project build directory
-            buildOutputPath = path.join(__dirname, '../../../build', platformDir);
+            // Development mode - run Python directly
+            return await this.startPythonDirect();
         } else {
-            // Production mode - electron-builder extraResources path
-            buildOutputPath = path.join(process.resourcesPath, 'build', platformDir);
+            // Production mode - use built executable
+            return await this.startExecutable();
+        }
+    }
+
+    /**
+     * Start the Python server directly in development mode
+     * @returns {Promise<number>}
+     */
+    async startPythonDirect() {
+        const port = await findAvailablePort(5050, 6000);
+        this.port = port;
+
+        // Find the Python server file
+        const serverPyPath = path.join(__dirname, '../../../server/main.py');
+        
+        // Check if the Python file exists
+        if (!fs.existsSync(serverPyPath)) {
+            throw new Error(`Python server file not found at: ${serverPyPath}`);
         }
 
-        const serverExePath = path.join(buildOutputPath, binaryName);
+        console.log(`[PrintService] Starting Python server directly: ${serverPyPath}`);
+
+        // Use python3 on non-Windows, python on Windows
+        const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
         
+        this.serverProcess = spawn(pythonCommand, [serverPyPath, `--port=${port}`], {
+            detached: false,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: false,
+            cwd: path.dirname(serverPyPath) // Set working directory to the Python file's location
+        });
+
+        this.setupProcessHandlers();
+        return port;
+    }
+
+    /**
+     * Start the built executable (production mode)
+     * @returns {Promise<number>}
+     */
+    async startExecutable() {
+        const binaryName = process.platform === 'win32' ? 'main.exe' : 'main';
+        const platformDir = process.platform === 'win32' ? 'win-x64' : 'linux-x64';
+        
+        // Production mode - electron-builder extraResources path
+        const buildOutputPath = path.join(process.resourcesPath, 'build', platformDir);
+        const serverExePath = path.join(buildOutputPath, binaryName);
         
         // Check if the executable exists
         if (!fs.existsSync(serverExePath)) {
-            console.error(`ERROR: Print service executable not found at: ${serverExePath}`);
-            console.error(`Make sure you have built the ${platformDir} executable.`);
-            
-            throw new Error('Print service executable not found');
+            throw new Error(`Print service executable not found at: ${serverExePath}`);
         }
         
         const port = await findAvailablePort(5050, 6000);
@@ -54,6 +88,14 @@ export default class PrintService {
             windowsHide: false,
         });
 
+        this.setupProcessHandlers();
+        return port;
+    }
+
+    /**
+     * Setup common process event handlers
+     */
+    setupProcessHandlers() {
         this.serverProcess.stdout.on("data", (data) => {
             console.log("[PrintService] SERVER STDOUT:", data.toString());
         });
@@ -69,8 +111,12 @@ export default class PrintService {
             this.serverProcess = null;
             this.port = null;
         });
-        
-        return port;
+
+        this.serverProcess.on('error', (error) => {
+            console.error('[PrintService] Failed to start process:', error);
+            this.serverProcess = null;
+            this.port = null;
+        });
     }
 
     /**
