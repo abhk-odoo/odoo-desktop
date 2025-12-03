@@ -4,3 +4,4 @@ pydantic
 pyinstaller
 python-escpos
 pyusb
+pillow

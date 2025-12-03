@@ -11,6 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from ddl_path import load_libusb_backend
+from PIL import Image, ImageOps
+import io
 
 backend = load_libusb_backend()
 
@@ -40,9 +42,7 @@ app.add_middleware(
 
 class PrintRequest(BaseModel):
     """Model for receiving raster print job data."""
-    raster_base64: str
-    width: int
-    height: int
+    receipt: str
     vendor_id: str
     product_id: str
     cash_drawer: bool = False
@@ -51,6 +51,36 @@ class PrintRequest(BaseModel):
 def read_root():
     """Health check endpoint."""
     return {"status": True, "message": "Printer server is running."}
+
+def image_to_escpos_raster(img: Image.Image):
+    # Convert to 1-bit WITHOUT threshold tweaking
+    img = img.convert("L")
+    img = ImageOps.invert(img)
+    img = img.convert("1")
+
+    width, height = img.size
+
+    if width % 8 != 0:
+        padded_width = width + (8 - width % 8)
+        padded = Image.new("1", (padded_width, height), 1)
+        padded.paste(img, (0, 0))
+        img = padded
+        width = padded_width
+
+    bytes_per_row = width // 8
+    dots = img.tobytes()
+
+    esc = b""
+    esc += b"\x1b@"
+    esc += b"\x1b\x61\x01"
+    esc += b"\x1d\x76\x30\x00"
+    esc += bytes([bytes_per_row & 0xFF, bytes_per_row >> 8])
+    esc += bytes([height & 0xFF, height >> 8])
+    esc += dots
+    esc += b"\n\n\n\n"
+    esc += b"\x1d\x56\x00"
+
+    return esc
 
 print_queue = Queue(maxsize=100)
 
@@ -70,47 +100,13 @@ def printer_worker():
 def handle_print_job(data: PrintRequest):
     """Handles the raster print job using direct USB write (Epson style)."""
     try:
-        # Decode raster image
-        raster_bytes = base64.b64decode(data.raster_base64)
+        receipt = base64.b64decode(data.receipt)
+        im = Image.open(io.BytesIO(receipt))
 
-        width = data.width
-        height = data.height
+        esc = image_to_escpos_raster(im)
 
-        if width % 8 != 0:
-            width += 8 - (width % 8)
-
-        bytes_per_row = width // 8
-
-        esc = b"\x1b@"
-
-        esc += b"\x1b\x61\x01"
-
-        left_margin = 40  # adjust if needed
-        esc += b"\x1b\x6c" + bytes([
-            left_margin & 0xFF,
-            (left_margin >> 8) & 0xFF
-        ])
-
-        header = (
-            b"\x1d\x76\x30\x00"
-            + bytes([bytes_per_row & 0xFF, (bytes_per_row >> 8) & 0xFF])
-            + bytes([height & 0xFF, (height >> 8) & 0xFF])
-        )
-
-        esc += header + raster_bytes
-
-        # ---- Add bottom padding ----
-        BOTTOM_PADDING = 200  # pixels
-        empty_row = b"\x00" * bytes_per_row
-        esc += empty_row * BOTTOM_PADDING
-
-        # ---- Cut paper ----
-        esc += b"\n"
-        esc += b"\x1dV\x00"  # full cut
-
-        # ---- Cash drawer (optional) ----
         if data.cash_drawer:
-            esc += b"\x1bp\x02\x40\x50"
+            esc += b"\x1b\x70\x00\x40\x50"
 
         # ---- Locate printer ----
         vendor_id = int(data.vendor_id, 16)
@@ -126,6 +122,11 @@ def handle_print_job(data: PrintRequest):
                 dev.detach_kernel_driver(0)
         except Exception:
             pass
+
+        try:
+            dev.set_configuration()
+        except Exception as e:
+            logger.error(f"set_configuration failed: {e}")
 
         usb.util.claim_interface(dev, 0)
 
@@ -170,8 +171,14 @@ def is_system_usb_device(manufacturer, product):
     p = product.lower()
     return any(k in m or k in p for k in SYSTEM_USB_KEYWORDS)
 
-def list_known_epos_printers(known=True):
-    devices = usb.core.find(find_all=True)
+def get_string(device, index):
+    try:
+        return usb.util.get_string(device, index)
+    except Exception:
+        return None
+
+def list_known_epos_printers():
+    devices = usb.core.find(find_all=True, backend=backend)
     printers = []
 
     for device in devices:
@@ -179,9 +186,11 @@ def list_known_epos_printers(known=True):
             vid = device.idVendor
             pid = device.idProduct
 
-            is_known_vendor = vid in EPOS_PRINTERS
-            is_printer_interface = False
+            manufacturer = get_string(device, device.iManufacturer) or "Unknown"
+            product = get_string(device, device.iProduct) or "Unknown"
 
+            # Detect printer interfaces (ESC/POS or Zebra vendor-interface)
+            is_printer_interface = False
             for cfg in device:
                 for intf in cfg:
                     if intf.bInterfaceClass == 0x07:
@@ -190,18 +199,11 @@ def list_known_epos_printers(known=True):
                 if is_printer_interface:
                     break
 
-            manufacturer = usb.util.get_string(device, device.iManufacturer) or "Unknown"
-            product = usb.util.get_string(device, device.iProduct) or "Unknown"
-            name_combined = f"{manufacturer} {product}".lower()
-
+            # Skip system USB devices
             if is_system_usb_device(manufacturer, product):
                 continue
 
-            has_keyword_match = any(keyword in name_combined for keyword in KEYWORDS)
-
-            if known and not is_known_vendor:
-                continue
-            elif known and not (is_known_vendor or is_printer_interface or has_keyword_match):
+            if not (vid in EPOS_PRINTERS or is_printer_interface):
                 continue
 
             printers.append({
@@ -211,26 +213,97 @@ def list_known_epos_printers(known=True):
                 "vendor_name": EPOS_PRINTERS.get(vid, "Unknown"),
                 "product": product,
                 "matched_by": (
-                    "No Filter Applied" if known == False else
-                    "Vendor id" if is_known_vendor else
+                    "Vendor id" if vid in EPOS_PRINTERS else
                     "Interface class" if is_printer_interface else
                     "Name keyword"
                 ),
+                # Add USB interfaces only if detected
+                "usb_interfaces": [
+                    {
+                        "interface": intf.bInterfaceNumber,
+                        "endpoint": hex(ep.bEndpointAddress),
+                        "direction": (
+                            "OUT"
+                            if usb.util.endpoint_direction(ep.bEndpointAddress)
+                            == usb.util.ENDPOINT_OUT
+                            else "IN"
+                        ),
+                        "type": ep.bmAttributes,
+                    }
+                    for cfg in device
+                    for intf in cfg
+                    for ep in intf
+                ]
             })
 
         except Exception as e:
             logger.warning(f"Error reading device info: {e}")
-            continue
 
     return printers
 
 @app.get("/printer")
 def list_usb_printers():
     """Returns the list of detected printers."""
-    printers = list_known_epos_printers(known=True)
+    printers = list_known_epos_printers()
     if printers:
         return {"status": True, "printer": printers[0]}
     return {"status": False, "message": "No ESC/POS printers found"}
+
+@app.post("/test-lable")
+def print_small_barcode():
+    """Print ZPL barcode for Zebra ZD421 OEM USB (0a5f:0187)"""
+    try:
+        vid = 0x0a5f
+        pid = 0x0187
+
+        dev = usb.core.find(idVendor=vid, idProduct=pid, backend=load_libusb_backend())
+        if dev is None:
+            return {"status": False, "message": "Printer not found."}
+
+        # Detach kernel driver
+        try:
+            if dev.is_kernel_driver_active(0):
+                dev.detach_kernel_driver(0)
+        except:
+            pass
+
+        # Claim IF0
+        usb.util.claim_interface(dev, 0)
+
+        EP_OUT = 0x01
+
+        # *** REQUIRED FOR ZEBRA RAW USB (wakes channel) ***
+        dev.write(EP_OUT, b"\n\n", timeout=1000)
+
+        # *** CLEAN ZPL (NO leading spaces, no indentation) ***
+        zpl = (
+            b"^XA\n"
+            b"^PW254\n"
+            b"^LL203\n"
+            b"^FO20,20\n"
+            b"^BY2,2,40\n"
+            b"^BCN,40,Y,N,N\n"
+            b"^FD123456789^FS\n"
+            b"^FO20,100\n"
+            b"^A0N,30,30\n"
+            b"^FD123456789^FS\n"
+            b"^XZ"
+        )
+
+        # *** SEND ZPL BULK WRITE ***
+        dev.write(EP_OUT, zpl, timeout=5000)
+
+        # Flush
+        dev.write(EP_OUT, b"\n", timeout=1000)
+
+        # Release
+        usb.util.release_interface(dev, 0)
+        dev.reset()
+
+        return {"status": True, "message": "Barcode printed (RAW USB Bulk Mode)"}
+
+    except Exception as e:
+        return {"status": False, "message": str(e)}
 
 worker_thread = Thread(target=printer_worker, daemon=True)
 worker_thread.start()
