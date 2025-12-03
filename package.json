@@ -12,13 +12,10 @@
   },
   "scripts": {
     "start": "electron .",
-    "clean": "rimraf build dist server/build server/main.spec server/__pycache__",
-    "build-python-win": "cd server && pip install -r requirements.txt && pyinstaller --onefile --add-data \"ddl_path.py;.\" --add-data \"libusb;libusb\" --collect-data=escpos --name main --distpath ../build/win-x64 main.py",
-    "build-python-linux": "cd server && pip install -r requirements.txt && pyinstaller --onefile --add-data \"ddl_path.py:.\" --add-data \"libusb:libusb\" --collect-data=escpos --name main --distpath ../build/linux-x64 main.py",
-    "build-electron-win": "electron-builder --win nsis",
-    "build-electron-linux": "electron-builder --linux deb",
-    "build-win": "npm run clean && npm run build-python-win && npm run build-electron-win",
-    "build-linux": "npm run clean && npm run build-python-linux && npm run build-electron-linux"
+    "clean": "node build.js clean",
+    "build-win": "node build.js win",
+    "build-linux": "node build.js linux",
+    "build-mac": "node build.js mac"
   },
   "build": {
     "appId": "com.odoo.desktop",
@@ -54,6 +51,18 @@
           "target": "deb",
           "arch": [
             "x64"
+          ]
+        }
+      ],
+      "category": "Business"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
           ]
         }
       ],

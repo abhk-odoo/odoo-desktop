@@ -12,9 +12,9 @@ def get_dll_path():
 
     base_path = os.path.dirname(__file__)
     if arch == "64bit":
-        return os.path.join(base_path, "libusb", "libusb-1.0_x64.dll")
+        return os.path.join(base_path, "lib", "libusb-1.0_x64.dll")
     else:
-        return os.path.join(base_path, "libusb", "libusb-1.0_x32.dll")
+        return os.path.join(base_path, "lib", "libusb-1.0_x32.dll")
 
 def load_libusb_backend():
     dll_path = get_dll_path()
