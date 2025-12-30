@@ -1,11 +1,9 @@
 name: Build and Release
 
+permissions:
+  contents: write
+
 on:
-  push:
-    branches:
-      - master
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -76,6 +74,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
     - name: Download all artifacts
       uses: actions/download-artifact@v6
       with:
@@ -97,17 +98,11 @@ jobs:
           - Check the commit messages for detailed changes
           
           ### Downloads
-          - **Windows**: `odoo_desktop_${{ steps.version.outputs.version }}.exe`
-          - **macOS**: `odoo_desktop_${{ steps.version.outputs.version }}.dmg`
-          - **Linux**: `odoo_desktop_${{ steps.version.outputs.version }}_amd64.deb`
-          
-          ### SHA256 Checksums
-          ```
-          ${{ hashFiles('artifacts/*/dist/*.sha256') }}
-          ```
+          - Windows, macOS, and Linux builds are attached below
+
         files: |
-          artifacts/odoo-desktop-linux-x64/dist/*
-          artifacts/odoo-desktop-mac-x64/dist/*
-          artifacts/odoo-desktop-win-x64/dist/*
+          artifacts/odoo-desktop-linux-x64/**/odoo_desktop_${{ steps.version.outputs.version }}_amd64.deb
+          artifacts/odoo-desktop-win-x64/**/odoo_desktop_${{ steps.version.outputs.version }}.exe
+          artifacts/odoo-desktop-mac-x64/**/odoo_desktop_${{ steps.version.outputs.version }}.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

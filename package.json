@@ -21,6 +21,7 @@
     "appId": "com.odoo.desktop",
     "productName": "Odoo Desktop",
     "icon": "app/assets/icon.png",
+    "publish": null,
     "directories": {
       "output": "dist"
     },
