@@ -1,11 +1,9 @@
 name: Build and Release
 
+permissions:
+  contents: write
+
 on:
-  push:
-    branches:
-      - master
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -76,6 +74,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
     - name: Download all artifacts
       uses: actions/download-artifact@v6
       with:
@@ -85,6 +86,24 @@ jobs:
       id: version
       run: |
         echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release
+
+        VERSION=${{ steps.version.outputs.version }}
+
+        # Linux (amd64)
+        find artifacts -type f -name "odoo_desktop_${VERSION}_amd64.deb" -exec \
+          cp {} release/Odoo-Desktop-${VERSION}-amd64.deb \;
+
+        # Windows
+        find artifacts -type f -name "Odoo Desktop Setup ${VERSION}.exe" -exec \
+          cp {} release/Odoo-Desktop-${VERSION}.exe \;
+
+        # macOS (arm64)
+        find artifacts -type f -name "Odoo Desktop-${VERSION}-arm64.dmg" -exec \
+          cp {} release/Odoo-Desktop-${VERSION}-arm64.dmg \;
 
     - name: Create Release
       id: create_release
@@ -97,17 +116,10 @@ jobs:
           - Check the commit messages for detailed changes
           
           ### Downloads
-          - **Windows**: `odoo_desktop_${{ steps.version.outputs.version }}.exe`
-          - **macOS**: `odoo_desktop_${{ steps.version.outputs.version }}.dmg`
-          - **Linux**: `odoo_desktop_${{ steps.version.outputs.version }}_amd64.deb`
-          
-          ### SHA256 Checksums
-          ```
-          ${{ hashFiles('artifacts/*/dist/*.sha256') }}
-          ```
-        files: |
-          artifacts/odoo-desktop-linux-x64/dist/*
-          artifacts/odoo-desktop-mac-x64/dist/*
-          artifacts/odoo-desktop-win-x64/dist/*
+            - Windows (.exe)
+            - macOS (.dmg)
+            - Linux (.deb)
+
+        files: release/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
