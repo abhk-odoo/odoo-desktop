@@ -1,0 +1,113 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+
+env:
+  NODE_VERSION: '24.12.0'
+  PYTHON_VERSION: '3.12.3'
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            build_script: build-linux
+            artifact_name: odoo-desktop-linux-x64
+          - os: macos-latest
+            platform: mac
+            build_script: build-mac
+            artifact_name: odoo-desktop-mac-x64
+          - os: windows-latest
+            platform: win
+            build_script: build-win
+            artifact_name: odoo-desktop-win-x64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install Node.js dependencies
+      run: npm ci
+
+    - name: Install Python dependencies
+      run: pip install -r server/requirements.txt
+
+    - name: Run build script
+      run: npm run ${{ matrix.build_script }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: |
+          dist/
+        retention-days: 7
+
+  create-release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v6
+      with:
+        path: artifacts
+
+    - name: Get version from package.json
+      id: version
+      run: |
+        echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: "Odoo Desktop v${{ steps.version.outputs.version }}"
+        body: |
+          ### Changes
+          - Check the commit messages for detailed changes
+          
+          ### Downloads
+          - **Windows**: `odoo_desktop_${{ steps.version.outputs.version }}.exe`
+          - **macOS**: `odoo_desktop_${{ steps.version.outputs.version }}.dmg`
+          - **Linux**: `odoo_desktop_${{ steps.version.outputs.version }}_amd64.deb`
+          
+          ### SHA256 Checksums
+          ```
+          ${{ hashFiles('artifacts/*/dist/*.sha256') }}
+          ```
+        files: |
+          artifacts/odoo-desktop-linux-x64/dist/*
+          artifacts/odoo-desktop-mac-x64/dist/*
+          artifacts/odoo-desktop-win-x64/dist/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
