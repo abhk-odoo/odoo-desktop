@@ -2,8 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('printer', {
   printReceipt: async (content) => {
-    const port = await ipcRenderer.invoke('get-print-port');
     try {
+      const port = await ipcRenderer.invoke('get-print-port');
       const response = await fetch(`http://localhost:${port}/print`, {
         method: "POST",
         headers: {
@@ -11,22 +11,29 @@ contextBridge.exposeInMainWorld('printer', {
         },
         body: JSON.stringify(content)
       });
-      const respJson = await response.json();
-      return respJson;
-    } catch (err) {
+      return await response.json();
+    } catch (error) {
       return {
-        success: false,
-        message: err.message
-      }
+        status: false,
+        printer: null,
+        message: error.message,
+        error_code: 'CONNECTION_FAILED'
+      };
     }
   },
   getDefaultPrinter: async () => {
-    const port = await ipcRenderer.invoke('get-print-port');
     try {
-      const res = await fetch(`http://localhost:${port}/printer`);
-      return await res.json();
+      const port = await ipcRenderer.invoke('get-print-port');
+      const response = await fetch(`http://localhost:${port}/printer`);
+
+      return await response.json();
     } catch (error) {
-      return { success: false, message: error.message};
+      return {
+        status: false,
+        printer: null,
+        message: error.message,
+        error_code: 'CONNECTION_FAILED'
+      };
     }
   }
 });
@@ -37,6 +44,9 @@ contextBridge.exposeInMainWorld('domain', {
   get_domain_history: () => ipcRenderer.invoke('get-domain-history'),
   save_domain: (url) => ipcRenderer.invoke('save-domain', url)
 });
+
+// Common API
+contextBridge.exposeInMainWorld("isNativeApp", true);
 
 const patchPushManagerOnly = `
 (function() {
