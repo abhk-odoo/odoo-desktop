@@ -1,20 +1,24 @@
+import base64
 import io
+
 import usb.core
 import usb.util
-import base64
-from fastapi import APIRouter
-from pydantic import BaseModel
-from PIL import Image
 from config.ddl_path import load_libusb_backend
+from fastapi import APIRouter
+from PIL import Image
+from pydantic import BaseModel
 
 router = APIRouter()
+
 
 class Request(BaseModel):
     image: str
     width: float
     height: float
 
+
 DPI = 203  # Dots per inch for Zebra printers
+
 
 def cm_to_pixels(cm: float) -> int:
     px = int((cm / 2.54) * DPI)
@@ -22,6 +26,7 @@ def cm_to_pixels(cm: float) -> int:
     if px % 8 != 0:
         px -= px % 8
     return px
+
 
 @router.post("/test-lable")
 def test_label(data: Request):

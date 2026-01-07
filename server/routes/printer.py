@@ -1,24 +1,147 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from services.printer_service import print_queue
-from services.detection_service import list_known_printers
+from services.detection_service import DetectionService
+from services.printer_service_usb import get_usb_printer_service
 
 router = APIRouter()
+detector = DetectionService()
+
 
 class PrintRequest(BaseModel):
-    receipt: str
+    action: str
+    name: str
     vendor_id: str
     product_id: str
+    receipt: str = None
     cash_drawer: bool = False
 
-@router.post("/print")
-def print_receipt(data: PrintRequest):
-    print_queue.put(data)
-    return {"status": True, "message": "Print job queued."}
 
-@router.get("/printer")
+class PrintStatusRequest(BaseModel):
+    action: str
+
+
+class PrinterResponse(BaseModel):
+    status: bool
+    message: str
+    printer: list[dict] = None
+    error_code: str = None
+
+
+@router.post("/print", response_model=PrinterResponse)
+def print_receipt(data: PrintRequest):
+    if not data.vendor_id or not data.product_id:
+        return PrinterResponse(
+            status=False,
+            message="Vendor ID and Product ID are required",
+            error_code="PRINTER_NOT_FOUND",
+        )
+
+    printer_config = {
+        "vendor_id": data.vendor_id,
+        "product_id": data.product_id,
+        "action": data.action,
+        "name": data.name,
+    }
+
+    try:
+        printer = get_usb_printer_service(printer_config)
+
+        if data.receipt:
+            printer.print_receipt({"receipt": data.receipt})
+
+        if data.cash_drawer:
+            printer.open_cash_drawer()
+
+        return PrinterResponse(
+            status=True,
+            message="Print job queued successfully",
+        )
+    except RuntimeError as e:
+        error_msg = str(e)
+        error_code = "PRINT_FAILED"
+
+        # Categorize specific error types
+        if "No printers available" in error_msg:
+            error_code = "PRINTER_NOT_FOUND"
+        elif "USB" in error_msg or "device" in error_msg.lower():
+            error_code = "USB_ERROR"
+        elif "paper" in error_msg.lower() or "roll" in error_msg.lower():
+            error_code = "PAPER_OUT"
+        elif "cover" in error_msg.lower():
+            error_code = "COVER_OPEN"
+
+        return PrinterResponse(
+            status=False,
+            message=f"Failed to print receipt: {error_msg}",
+            error_code=error_code,
+        )
+
+
+@router.get("/printer", response_model=PrinterResponse)
 def list_printers():
-    printers = list_known_printers()
-    if printers:
-        return {"status": True, "printer": printers[0]}
-    return {"status": False, "message": "No printers found"}
+    try:
+        printers = detector.list_printers()
+        if printers:
+            return PrinterResponse(
+                status=True,
+                message="Printers found",
+                printer=printers,
+            )
+
+        return PrinterResponse(
+            status=False,
+            message="No printers available",
+            error_code="PRINTER_NOT_FOUND",
+        )
+    except RuntimeError as e:
+        return PrinterResponse(
+            status=False,
+            message=f"Failed to list printers: {e!s}",
+            error_code="CONNECTION_FAILED",
+        )
+
+
+@router.post("/print/status", response_model=PrinterResponse)
+def print_printer_status(data: PrintStatusRequest):
+    """Print a status ticket for the first available printer."""
+    printers = detector.list_printers()
+
+    if not printers or not printers[0]:
+        return PrinterResponse(
+            status=False,
+            message="No printers available",
+            error_code="PRINTER_NOT_FOUND",
+        )
+
+    printer_info = printers[0]
+    printer_config = {
+        "vendor_id": printer_info["vendor_id"],
+        "product_id": printer_info["product_id"],
+        "action": data.action,
+        "name": printer_info["product"] or "Unknown",
+    }
+
+    printer = get_usb_printer_service(printer_config)
+
+    try:
+        printer.print_status()
+        return PrinterResponse(
+            status=True,
+            message=f"Status ticket queued for {printer_info['product'] or 'Printer'}",
+            printer=[printer_info],
+        )
+    except RuntimeError as e:
+        error_msg = str(e)
+        error_code = "PRINT_FAILED"
+
+        # Categorize specific error types
+        if "paper" in error_msg.lower() or "roll" in error_msg.lower():
+            error_code = "PAPER_OUT"
+        elif "cover" in error_msg.lower():
+            error_code = "COVER_OPEN"
+
+        return PrinterResponse(
+            status=False,
+            message=f"Failed to print status ticket: {error_msg}",
+            error_code=error_code,
+        )

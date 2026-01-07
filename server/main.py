@@ -1,14 +1,23 @@
 import sys
-import atexit
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes.root import router as root_router
 from routes.printer import router as printer_router
+from routes.root import router as root_router
 from routes.zebra import router as zebra_router
-from services.printer_service import printer_shutdown
+from services.printer_service_usb import shutdown_usb_printer_services
 
-app = FastAPI(title="Local Print Agent API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    # cleanup code
+    shutdown_usb_printer_services()
+
+
+app = FastAPI(title="Local Print Agent API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,12 +30,8 @@ app.include_router(root_router)
 app.include_router(printer_router)
 app.include_router(zebra_router)
 
-def shutdown_event():
-    printer_shutdown()
 
 if __name__ == "__main__":
-    atexit.register(shutdown_event)
-
     port = 5050
     for arg in sys.argv:
         if arg.startswith("--port="):
