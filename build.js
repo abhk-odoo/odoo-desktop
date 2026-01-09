@@ -14,17 +14,17 @@ switch (arg) {
 
     case "python-win":
         run(`cd server && pip install -r requirements.txt`);
-        run(`cd server && pyinstaller --onefile --add-data "config/ddl_path.py;." --add-data "lib;libusb" --collect-data=escpos --name main --distpath ../build/win-x64 main.py`);
+        run(`cd server && pyinstaller --onefile --add-data "config/ddl_path.py;." --add-data "lib;lib" --collect-data=escpos --name main --distpath ../build/win-x64 main.py`);
         break;
 
     case "python-linux":
         run(`cd server && pip install -r requirements.txt`);
-        run(`cd server && pyinstaller --onefile --add-data "config/ddl_path.py:." --add-data "lib:libusb" --collect-data=escpos --name main --distpath ../build/linux-x64 main.py`);
+        run(`cd server && pyinstaller --onefile --add-data "config/ddl_path.py:." --add-data "lib:lib" --collect-data=escpos --name main --distpath ../build/linux-x64 main.py`);
         break;
 
     case "python-mac":
         run(`cd server && pip install -r requirements.txt`);
-        run(`cd server && pyinstaller --onefile --add-data "config/ddl_path.py:." --add-data "lib:libusb" --collect-data=escpos --name main --distpath ../build/mac-x64 main.py`);
+        run(`cd server && pyinstaller --onefile --add-data "config/ddl_path.py:." --add-data "lib:lib" --collect-data=escpos --name main --distpath ../build/mac-x64 main.py`);
         break;
 
     case "electron-win":

@@ -40,21 +40,9 @@ class PrinterServiceBase(ABC):
         print_command = getattr(self, 'format_%s' % self.receipt_protocol)(im)
         self.print_raw(print_command)
 
-    @staticmethod
-    def center_image(im, printer_width_px):
-        if im.width >= printer_width_px:
-            return im
-
-        left_padding = (printer_width_px - im.width) // 2
-        right_padding = printer_width_px - im.width - left_padding
-
-        return ImageOps.expand(im, border=(left_padding, 0, right_padding, 0), fill=255)
-
     def format_escpos_bit_image_raster(self, im):
         """ prints with the `GS v 0`-command """
         width = int((im.width + 7) / 8)
-
-        im = self.center_image(im, width)
 
         raster_send = b'\x1d\x76\x30\x00'
         max_slice_height = 255
@@ -67,7 +55,7 @@ class PrinterServiceBase(ABC):
             raster_data += raster_send + width.to_bytes(2, 'little') + slice_height.to_bytes(2, 'little') + im_slice
             dots = dots[width * max_slice_height:]
 
-        return raster_data + self.PRINTER_COMMANDS['escpos']['cut']
+        return self.PRINTER_COMMANDS['escpos']['center'] + raster_data + self.PRINTER_COMMANDS['escpos']['cut']
 
     def format_escpos(self, im):
         """Print image using standard raster mode (GS v 0)."""
@@ -94,11 +82,12 @@ class PrinterServiceBase(ABC):
 
         title = b'Printer Status'
         body = (
-            f"\nPrinter Name : {self.device_name}\n"
+            f"\nPrinter\n"
+            f"Printer Name : {self.device_name}\n"
             f"Printer Type : {self.device_subtype}\n"
             f"\nSystem\n"
-            f"Hostname     : {hostname}\n"
-            f"IP Address   : {ip_address}\n"
+            f"Hostname : {hostname}\n"
+            f"IP Address : {ip_address}\n"
         ).encode()
 
         return title, body
