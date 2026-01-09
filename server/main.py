@@ -6,7 +6,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.printer import router as printer_router
 from routes.root import router as root_router
-from routes.zebra import router as zebra_router
 from services.printer_service_usb import shutdown_usb_printer_services
 
 
@@ -28,7 +27,6 @@ app.add_middleware(
 
 app.include_router(root_router)
 app.include_router(printer_router)
-app.include_router(zebra_router)
 
 
 if __name__ == "__main__":

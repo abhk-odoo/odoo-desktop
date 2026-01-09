@@ -1,33 +1,45 @@
+import ctypes
+import logging
 import os
 import platform
-import ctypes
+import sys
+
 import usb.backend.libusb1
+
+_logger = logging.getLogger(__name__)
+
 
 def get_dll_path():
     system = platform.system()
     arch, _ = platform.architecture()
 
     if system != "Windows":
-        return None  # For Linux/macOS, assume libusb is installed system-wide
+        return None
 
-    base_path = os.path.dirname(__file__)
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(__file__)
+        base_path = os.path.join(base_path, "..")
     if arch == "64bit":
         return os.path.join(base_path, "lib", "libusb-1.0_x64.dll")
-    else:
-        return os.path.join(base_path, "lib", "libusb-1.0_x32.dll")
+
+    return os.path.join(base_path, "lib", "libusb-1.0_x32.dll")
+
 
 def load_libusb_backend():
     dll_path = get_dll_path()
     if dll_path and os.path.exists(dll_path):
         try:
             ctypes.CDLL(dll_path)
-            print(f"[INFO] Loaded libusb DLL: {dll_path}")
+            _logger.info("Loaded libusb DLL from %s", dll_path)
         except OSError as e:
-            print(f"[ERROR] Failed to load libusb DLL: {e}")
+            _logger.error("Failed to load libusb DLL from %s: %s", dll_path, str(e))
             return None
 
-        backend = usb.backend.libusb1.get_backend(find_library=lambda x: dll_path)
-        return backend
-    else:
-        print("[INFO] No DLL needed or file not found. Using system libusb.")
-        return usb.backend.libusb1.get_backend()
+        return usb.backend.libusb1.get_backend(
+            find_library=lambda _: dll_path,
+        )
+
+    _logger.info("No DLL needed or file not found. Using system libusb.")
+    return usb.backend.libusb1.get_backend()
