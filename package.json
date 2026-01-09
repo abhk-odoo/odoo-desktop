@@ -33,6 +33,10 @@
       {
         "from": "build",
         "to": "build"
+      },
+      {
+        "from": "server/lib",
+        "to": "lib"
       }
     ],
     "win": {

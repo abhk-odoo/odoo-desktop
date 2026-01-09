@@ -73,7 +73,7 @@ class UsbPrinterService(PrinterServiceBase):
         try:
             if dev.is_kernel_driver_active(self.INTERFACE):
                 dev.detach_kernel_driver(self.INTERFACE)
-        except usb.core.USBError as e:
+        except (usb.core.USBError, RuntimeError) as e:
             _logger.warning("USB kernel driver detach failed: %s", str(e))
 
         dev.set_configuration()
