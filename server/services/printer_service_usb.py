@@ -76,16 +76,22 @@ class UsbPrinterService(PrinterServiceBase):
         except (usb.core.USBError, RuntimeError) as e:
             _logger.warning("USB kernel driver detach failed: %s", str(e))
 
-        dev.set_configuration()
+        if self.print_action == "receipt_printer":
+            dev.set_configuration()
 
         try:
             usb.util.claim_interface(dev, self.INTERFACE)
+
+            if self.print_action == "label_printer":
+                # ZPL requires a null byte before data
+                dev.write(self.EP_OUT, b"\x00\x00", timeout=1000)
+
             dev.write(self.EP_OUT, data, timeout=self.TIMEOUT)
         except usb.core.USBError as e:
             _logger.error("USB communication error: %s", e)
         finally:
             usb.util.release_interface(dev, self.INTERFACE)
-            dev.reset()
+            usb.util.dispose_resources(dev)
 
     def _printer_status_content(self):
         title, body = super()._printer_status_content()

@@ -12,7 +12,6 @@ class PrinterServiceBase(ABC):
     Handles data formatting (Raster/ZPL) and capability detection.
     """
 
-    # TODO: Consider star printer
     # Command definitions for various printer types
     PRINTER_COMMANDS = {
         'escpos': {
@@ -25,10 +24,9 @@ class PrinterServiceBase(ABC):
 
     def __init__(self, device_info):
         self.device_name = device_info.get('name', 'Unknown')
-        self.device_subtype = device_info.get("action")  # "receipt_printer" or "label_printer"
-        self.receipt_protocol = 'escpos'
+        self.print_action = device_info.get("action")  # "receipt_printer" or "label_printer"
 
-    def print_receipt(self, data):
+    def print(self, data):
         receipt = b64decode(data['receipt'])
         im = Image.open(BytesIO(receipt))
 
@@ -37,10 +35,14 @@ class PrinterServiceBase(ABC):
         im = ImageOps.invert(im)
         im = im.convert("1")
 
-        print_command = getattr(self, 'format_%s' % self.receipt_protocol)(im)
+        if self.print_action == "receipt_printer":
+            print_command = self.format_escpos(im)
+        elif self.print_action == "label_printer":
+            print_command = self.format_label(im)
+
         self.print_raw(print_command)
 
-    def format_escpos_bit_image_raster(self, im):
+    def format_escpos(self, im):
         """ prints with the `GS v 0`-command """
         width = int((im.width + 7) / 8)
 
@@ -57,23 +59,32 @@ class PrinterServiceBase(ABC):
 
         return self.PRINTER_COMMANDS['escpos']['center'] + raster_data + self.PRINTER_COMMANDS['escpos']['cut']
 
-    def format_escpos(self, im):
-        """Print image using standard raster mode (GS v 0)."""
-        return self.format_escpos_bit_image_raster(im)
-
     def print_status(self):
         """Prints the status ticket of the printer."""
-        if self.device_subtype == "receipt_printer":
+        if self.print_action == "receipt_printer":
             self.print_status_receipt()
-        # Add label printer support here
+        elif self.print_action == "label_printer":
+            self.print_status_label()
 
     def print_status_receipt(self):
         """Prints the status ticket on the current printer."""
         title, body = self._printer_status_content()
-        commands = self.PRINTER_COMMANDS[self.receipt_protocol]
+        commands = self.PRINTER_COMMANDS['escpos']
 
         title = commands['title'] % title
         self.print_raw(commands['center'] + title + b'\n' + body + commands['cut'])
+
+    def print_status_label(self):
+        zpl = b"""
+^XA^CI28
+^PW400
+^LL300
+^FT35,40^A0N,25^FDTest Product^FS
+^FO35,77^BY2^BCN,100,Y,N,N^FD30164785566333^FS
+^FO300,200^A0N,40^FD$ 120.00^FS
+^XZ
+""".strip()
+        self.print_raw(zpl)
 
     def _printer_status_content(self):
         """Formats the status information."""
@@ -84,7 +95,7 @@ class PrinterServiceBase(ABC):
         body = (
             f"\nPrinter\n"
             f"Printer Name : {self.device_name}\n"
-            f"Printer Type : {self.device_subtype}\n"
+            f"Printer Type : {self.print_action}\n"
             f"\nSystem\n"
             f"Hostname : {hostname}\n"
             f"IP Address : {ip_address}\n"
@@ -94,10 +105,10 @@ class PrinterServiceBase(ABC):
 
     def open_cash_drawer(self):
         """Generates and sends raw bytes to open the cash drawer."""
-        if self.device_subtype != "receipt_printer":
+        if self.print_action != "receipt_printer":
             return
 
-        for cmd in self.PRINTER_COMMANDS[self.receipt_protocol]['drawers']:
+        for cmd in self.PRINTER_COMMANDS['escpos']['drawers']:
             self.print_raw(cmd)
 
     @abstractmethod

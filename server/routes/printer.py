@@ -28,7 +28,7 @@ class PrinterResponse(BaseModel):
 
 
 @router.post("/print", response_model=PrinterResponse)
-def print_receipt(data: PrintRequest):
+def print(data: PrintRequest):
     if not data.vendor_id or not data.product_id:
         return PrinterResponse(
             status=False,
@@ -47,7 +47,7 @@ def print_receipt(data: PrintRequest):
         printer = get_usb_printer_service(printer_config)
 
         if data.receipt:
-            printer.print_receipt({"receipt": data.receipt})
+            printer.print({"receipt": data.receipt})
 
         if data.cash_drawer:
             printer.open_cash_drawer()
