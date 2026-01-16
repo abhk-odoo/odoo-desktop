@@ -86,6 +86,12 @@ class DetectionService:
                         self._get_string(device, device.iProduct)
                         or "Unknown"
                     ),
+                    "serial_number": (
+                        self._get_string(device, device.iSerialNumber)
+                        or "Unknown"
+                    ),
+                    "bus": device.bus,
+                    "address": device.address,
                     "usb_interfaces": self._get_interfaces(device),
                 })
             except (AttributeError, ValueError, TypeError) as e:

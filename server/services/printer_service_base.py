@@ -76,15 +76,34 @@ class PrinterServiceBase(ABC):
 
     def print_status_label(self):
         zpl = b"""
-^XA^CI28
-^PW400
-^LL300
-^FT35,40^A0N,25^FDTest Product^FS
-^FO35,77^BY2^BCN,100,Y,N,N^FD30164785566333^FS
-^FO300,200^A0N,40^FD$ 120.00^FS
-^XZ
-""".strip()
-        self.print_raw(zpl)
+            ^XA^CI28
+            ^PW400
+            ^LL300
+            ^FT35,40^A0N,25^FDTest Product^FS
+            ^FO35,77^BY2^BCN,100,Y,N,N^FD30164785566333^FS
+            ^FO300,200^A0N,40^FD$ 120.00^FS
+            ^XZ
+            """.strip()
+        tspl = b"""SIZE 100 mm, 50 mm
+            GAP 3 mm, 0
+            CLS
+            DIRECTION 1,0
+            REFERENCE 0,0
+            SPEED 4
+            DENSITY 8
+
+            REM TEXT: X=400, Y=100, Font=3, Rotation=0, X-mult=1, Y-mult=1, Align=2
+            TEXT 400,140,"3",0,1,1,2,"Test Product Barcode"
+
+            REM BARCODE: X=400, Y=180, Type=128, Height=50, Readable=1(below), Rotation=0, Narrow=2, Wide=2, Align=2
+            BARCODE 400,180,"128",50,1,0,2,2,2,"FD30164785566333"
+
+            REM TEXT: X=600, Y=280, Font=3, Rotation=0, X-mult=1, Y-mult=1, Align=2
+            TEXT 500,280,"3",0,1,1,2,"$ 120.00"
+
+            PRINT 1
+            """
+        self.print_raw(tspl)
 
     def _printer_status_content(self):
         """Formats the status information."""
