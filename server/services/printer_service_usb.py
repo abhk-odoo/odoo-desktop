@@ -1,4 +1,6 @@
+import contextlib
 import logging
+import time
 from queue import Empty, Queue
 from threading import Thread
 
@@ -13,6 +15,7 @@ _logger = logging.getLogger(__name__)
 class UsbPrinterService(PrinterServiceBase):
     """
     ESC/POS printer driver using direct USB (libusb / pyusb).
+    Linux-safe implementation.
     """
 
     EP_OUT = 0x01
@@ -25,21 +28,26 @@ class UsbPrinterService(PrinterServiceBase):
         self.vendor_id = device_info.get("vendor_id")
         self.product_id = device_info.get("product_id")
 
+        self._backend = load_libusb_backend()
+        self._device = None
+
         self._print_job = Queue(maxsize=100)
         self._worker = Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
-        self._backend = load_libusb_backend()
 
     def print_raw(self, data: bytes):
         """Queue raw ESC/POS bytes for USB transmission."""
         self._print_job.put(data)
 
     def shutdown(self):
-        """Gracefully stop worker thread."""
+        """stop worker thread and release USB device."""
         self._print_job.put(None)
         self._worker.join(timeout=5)
+
         if self._worker.is_alive():
-            _logger.warning("Worker thread did not shutdown gracefully")
+            _logger.warning("Worker thread did not shutdown cleanly")
+
+        self._release_device()
 
     def _worker_loop(self):
         while True:
@@ -55,11 +63,19 @@ class UsbPrinterService(PrinterServiceBase):
             try:
                 self._send_usb(data)
             except (usb.core.USBError, RuntimeError) as e:
-                _logger.error("USB print failed for job %s: %s", data, str(e))
+                _logger.error("USB print failed: %s", e)
+                self._release_device()
             finally:
                 self._print_job.task_done()
 
-    def _send_usb(self, data: bytes):
+    def _get_device(self):
+        """
+        Find, configure, and claim the USB printer once.
+        Linux requires persistent device + interface.
+        """
+        if self._device:
+            return self._device
+
         dev = usb.core.find(
             idVendor=int(self.vendor_id, 16),
             idProduct=int(self.product_id, 16),
@@ -67,25 +83,52 @@ class UsbPrinterService(PrinterServiceBase):
         )
 
         if dev is None:
-            _logger.error("Printer not found (vendor=%s, product=%s)", self.vendor_id, self.product_id)
-            return
+            raise RuntimeError(f"Printer not found (vendor={self.vendor_id}, product={self.product_id})")
 
         try:
             if dev.is_kernel_driver_active(self.INTERFACE):
                 dev.detach_kernel_driver(self.INTERFACE)
-        except (usb.core.USBError, RuntimeError) as e:
-            _logger.warning("USB kernel driver detach failed: %s", str(e))
+        except (usb.core.USBError, NotImplementedError, RuntimeError):
+            pass
 
         dev.set_configuration()
+        usb.util.claim_interface(dev, self.INTERFACE)
 
-        try:
-            usb.util.claim_interface(dev, self.INTERFACE)
-            dev.write(self.EP_OUT, data, timeout=self.TIMEOUT)
-        except usb.core.USBError as e:
-            _logger.error("USB communication error: %s", e)
-        finally:
-            usb.util.release_interface(dev, self.INTERFACE)
-            dev.reset()
+        self._device = dev
+        _logger.info(
+            "USB printer connected (vendor=%s, product=%s)",
+            self.vendor_id,
+            self.product_id,
+        )
+
+        return dev
+
+    def _send_usb(self, data: bytes):
+        """Send raw ESC/POS bytes."""
+        dev = self._get_device()
+
+        dev.write(self.EP_OUT, data, timeout=self.TIMEOUT)
+
+        time.sleep(0.03)
+
+    def _release_device(self):
+        """Release USB device on shutdown."""
+        if not self._device:
+            return
+
+        with contextlib.suppress(usb.core.USBError):
+            usb.util.release_interface(self._device, self.INTERFACE)
+
+        with contextlib.suppress(Exception):
+            usb.util.dispose_resources(self._device)
+
+        _logger.info(
+            "USB printer released (vendor=%s, product=%s)",
+            self.vendor_id,
+            self.product_id,
+        )
+
+        self._device = None
 
     def _printer_status_content(self):
         title, body = super()._printer_status_content()
