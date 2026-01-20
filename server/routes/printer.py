@@ -47,9 +47,9 @@ def print_receipt(data: PrintRequest):
         printer = get_usb_printer_service(printer_config)
 
         if data.receipt:
-            printer.print_receipt({"receipt": data.receipt})
+            printer.print_receipt({"receipt": data.receipt, "cash_drawer": data.cash_drawer})
 
-        if data.cash_drawer:
+        if data.cash_drawer and not data.receipt:
             printer.open_cash_drawer()
 
         return PrinterResponse(

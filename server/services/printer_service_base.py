@@ -35,8 +35,9 @@ class PrinterServiceBase(ABC):
         im = im.convert("1")
 
         if self.print_action == "receipt_printer":
-            print_command = self.format_escpos(im)
-        self.print_raw(print_command)
+            payload = b"".join(self.PRINTER_COMMANDS["escpos"]["drawers"]) if data.get("cash_drawer") else b""
+            payload += self.format_escpos(im)
+        self.print_raw(payload)
 
     def format_escpos(self, im):
         """ prints with the `GS v 0`-command """
@@ -90,8 +91,7 @@ class PrinterServiceBase(ABC):
         if self.print_action != "receipt_printer":
             return
 
-        for cmd in self.PRINTER_COMMANDS['escpos']['drawers']:
-            self.print_raw(cmd)
+        self.print_raw(b"".join(self.PRINTER_COMMANDS["escpos"]["drawers"]))
 
     @abstractmethod
     def print_raw(self, data: bytes):
