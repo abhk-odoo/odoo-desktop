@@ -60,15 +60,10 @@ def print_receipt(data: PrintRequest):
         error_msg = str(e)
         error_code = "PRINT_FAILED"
 
-        # Categorize specific error types
-        if "No printers available" in error_msg:
+        if "not found" in error_msg.lower() or "no printers" in error_msg.lower():
             error_code = "PRINTER_NOT_FOUND"
-        elif "USB" in error_msg or "device" in error_msg.lower():
-            error_code = "USB_ERROR"
-        elif "paper" in error_msg.lower() or "roll" in error_msg.lower():
-            error_code = "PAPER_OUT"
-        elif "cover" in error_msg.lower():
-            error_code = "COVER_OPEN"
+        elif "usb" in error_msg.lower() or "device" in error_msg.lower() or "connection" in error_msg.lower():
+            error_code = "CONNECTION_FAILED"
 
         return PrinterResponse(
             status=False,

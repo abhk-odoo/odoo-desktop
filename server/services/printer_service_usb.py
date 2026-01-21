@@ -116,10 +116,13 @@ class UsbPrinterService(PrinterServiceBase):
         if not self._device:
             return
 
-        with contextlib.suppress(usb.core.USBError):
+        with contextlib.suppress(usb.core.USBError, Exception):
             usb.util.release_interface(self._device, self.INTERFACE)
 
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(usb.core.USBError, Exception):
+            self._device.reset()
+
+        with contextlib.suppress(usb.core.USBError, Exception):
             usb.util.dispose_resources(self._device)
 
         _logger.info(
