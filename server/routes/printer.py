@@ -9,9 +9,7 @@ detector = DetectionService()
 
 class PrintRequest(BaseModel):
     action: str
-    name: str
-    vendor_id: str
-    product_id: str
+    printer: dict
     receipt: str = None
     cash_drawer: bool = False
 
@@ -29,22 +27,16 @@ class PrinterResponse(BaseModel):
 
 @router.post("/print", response_model=PrinterResponse)
 def print_receipt(data: PrintRequest):
-    if not data.vendor_id or not data.product_id:
+    printer_data = data.printer or {}
+    if not printer_data.get("vendor_id") or not printer_data.get("product_id"):
         return PrinterResponse(
             status=False,
-            message="Vendor ID and Product ID are required",
+            message="Printer identification is missing",
             error_code="PRINTER_NOT_FOUND",
         )
-
-    printer_config = {
-        "vendor_id": data.vendor_id,
-        "product_id": data.product_id,
-        "action": data.action,
-        "name": data.name,
-    }
-
+    printer_data["action"] = data.action
     try:
-        printer = get_usb_printer_service(printer_config)
+        printer = get_usb_printer_service(printer_data)
 
         if data.receipt:
             printer.print_receipt({"receipt": data.receipt, "cash_drawer": data.cash_drawer})
@@ -109,14 +101,9 @@ def print_printer_status(data: PrintStatusRequest):
         )
 
     printer_info = printers[0]
-    printer_config = {
-        "vendor_id": printer_info["vendor_id"],
-        "product_id": printer_info["product_id"],
-        "action": data.action,
-        "name": printer_info["product"] or "Unknown",
-    }
+    printer_info['action'] = data.action
 
-    printer = get_usb_printer_service(printer_config)
+    printer = get_usb_printer_service(printer_info)
 
     try:
         printer.print_status()

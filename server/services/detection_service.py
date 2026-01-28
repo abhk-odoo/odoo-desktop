@@ -66,6 +66,26 @@ class DetectionService:
             )
         return interfaces
 
+    def _normalize_printer_names(self, printers):
+        """
+        Add a unique, user-friendly display_name for each printer.
+        Example: TM-T82, TM-T82 (2), Printer, Printer (2)
+        """
+        seen = {}
+
+        for printer in printers:
+            product = (printer.get("product") or "").strip()
+            base_name = product if product and product != "Unknown" else "Printer"
+
+            key = (printer["vendor_id"], printer["product_id"], base_name)
+
+            seen[key] = seen.get(key, 0) + 1
+            printer["display_name"] = (
+                f"{base_name} ({seen[key]})"
+                if seen[key] > 1
+                else base_name
+            )
+
     def list_printers(self):
         printers = []
         devices = usb.core.find(find_all=True, backend=self.backend)
@@ -76,16 +96,19 @@ class DetectionService:
 
             try:
                 printers.append({
-                    "vendor_id": f"{device.idVendor:04x}",
-                    "product_id": f"{device.idProduct:04x}",
-                    "manufacturer": (
-                        self._get_string(device, device.iManufacturer)
-                        or "Unknown"
-                    ),
                     "product": (
                         self._get_string(device, device.iProduct)
                         or "Unknown"
                     ),
+                    "manufacturer": (
+                        self._get_string(device, device.iManufacturer)
+                        or "Unknown"
+                    ),
+                    "vendor_id": f"{device.idVendor:04x}",
+                    "product_id": f"{device.idProduct:04x}",
+                    "serial_number": self._get_string(device, device.iSerialNumber),
+                    "bus": device.bus,
+                    "address": device.address,
                     "usb_interfaces": self._get_interfaces(device),
                 })
             except (AttributeError, ValueError, TypeError) as e:
@@ -94,4 +117,5 @@ class DetectionService:
                     e,
                 )
 
+        self._normalize_printer_names(printers)
         return printers

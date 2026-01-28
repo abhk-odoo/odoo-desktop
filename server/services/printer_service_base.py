@@ -22,7 +22,7 @@ class PrinterServiceBase(ABC):
     }
 
     def __init__(self, device_info):
-        self.device_name = device_info.get('name', 'Unknown')
+        self.device_name = device_info.get('display_name', 'Unknown')
         self.print_action = device_info.get("action")  # "receipt_printer" or "label_printer"
 
     def print_receipt(self, data):
