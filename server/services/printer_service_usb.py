@@ -27,7 +27,6 @@ class UsbPrinterService(PrinterServiceBase):
 
         self.vendor_id = device_info.get("vendor_id")
         self.product_id = device_info.get("product_id")
-        self.serial_number = device_info.get("serial_number")
 
         self._backend = load_libusb_backend()
         self._device = None
@@ -77,45 +76,32 @@ class UsbPrinterService(PrinterServiceBase):
         if self._device:
             return self._device
 
-        device = list(usb.core.find(
+        dev = usb.core.find(
             idVendor=int(self.vendor_id, 16),
             idProduct=int(self.product_id, 16),
             backend=self._backend,
-            find_all=True,
-        ))
+        )
 
-        if device is None:
+        if dev is None:
             raise RuntimeError(f"Printer not found (vendor={self.vendor_id}, product={self.product_id})")
 
-        selected = None
-        if self.serial_number:
-            for dev in device:
-                if dev.serial_number == self.serial_number:
-                    selected = dev
-                    break
-
-            if not selected:
-                _logger.warning(
-                    "USB printer with serial %s not found, falling back to first device",
-                    self.serial_number,
-                )
-
-        if not selected:
-            if len(device) > 1 and not self.serial_number:
-                _logger.warning("Multiple USB printers detected but no serial number provided.")
-            selected = device[0]
-
         try:
-            if selected.is_kernel_driver_active(self.INTERFACE):
-                selected.detach_kernel_driver(self.INTERFACE)
+            if dev.is_kernel_driver_active(self.INTERFACE):
+                dev.detach_kernel_driver(self.INTERFACE)
         except (usb.core.USBError, NotImplementedError, RuntimeError):
             pass
 
-        selected.set_configuration()
-        usb.util.claim_interface(selected, self.INTERFACE)
+        dev.set_configuration()
+        usb.util.claim_interface(dev, self.INTERFACE)
 
-        self._device = selected
-        return selected
+        self._device = dev
+        _logger.info(
+            "USB printer connected (vendor=%s, product=%s)",
+            self.vendor_id,
+            self.product_id,
+        )
+
+        return dev
 
     def _send_usb(self, data: bytes):
         """Send raw ESC/POS bytes."""
@@ -155,7 +141,6 @@ class UsbPrinterService(PrinterServiceBase):
             f"Type : USB\n"
             f"Vendor ID : {self.vendor_id}\n"
             f"Product ID : {self.product_id}\n"
-            f"Serial Number: {self.serial_number or 'N/A'}\n"
         ).encode()
 
         return title, body + usb_info
@@ -166,7 +151,7 @@ _printer_services: dict[tuple[str, str], UsbPrinterService] = {}
 
 def get_usb_printer_service(device_info: dict) -> UsbPrinterService:
     """Return a UsbPrinterService instance per physical printer."""
-    key = (device_info["vendor_id"], device_info["product_id"], device_info["serial_number"] or None)
+    key = (device_info["vendor_id"], device_info["product_id"])
 
     service = _printer_services.get(key)
     if service is None:
