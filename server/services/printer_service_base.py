@@ -35,8 +35,8 @@ class PrinterServiceBase(ABC):
         im = im.convert("1")
 
         if self.print_action == "receipt_printer":
-            payload = b"".join(self.PRINTER_COMMANDS["escpos"]["drawers"]) if data.get("cash_drawer") else b""
-            payload += self.format_escpos(im)
+            payload = self.format_escpos(im)
+
         self.print_raw(payload)
 
     def format_escpos(self, im):
