@@ -44,29 +44,34 @@ async function startApp() {
 
 app.whenReady().then(startApp);
 
-// Handle quit
-let isQuitting = false;
-app.on('before-quit', async (event) => {
-    if (isQuitting) {
-        return
-    };
-    event.preventDefault();
-    isQuitting = true;
+let shuttingDown = false;
+async function shutdownApp(source) {
+    if (shuttingDown) return;
+    shuttingDown = true;
 
-    if (printService) {
-        await printService.stop()
-    };
+    console.log(`[App] Shutting down (${source})`);
 
-    process.exit(0);
+    try {
+        if (printService) {
+            await printService.stop();
+        }
+        console.log("[App] Print service stopped successfully");
+    } catch (err) {
+        console.error("Shutdown error:", err);
+    }
+
+    app.exit(0);
+}
+
+app.on("before-quit", (e) => {
+    e.preventDefault();
+    shutdownApp("before-quit");
 });
 
-app.on('window-all-closed', async () => {
-    if (printService) {
-        await printService.stop()
-    };
-    if (process.platform !== 'darwin') {
-        app.quit()
-    };
+app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+        shutdownApp("window-all-closed");
+    }
 });
 
 // Handle system signals

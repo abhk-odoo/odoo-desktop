@@ -1,58 +1,34 @@
-import { exec } from 'child_process';
+import { exec } from "child_process";
 
 /**
- * Stop a process gracefully with platform-specific handling
- * @param {ChildProcess} process - The process to stop
- * @returns {Promise<void>}
+ * Kill a child process reliably (Windows + Unix)
+ * @param {import("child_process").ChildProcess} child
  */
-export const stopProcess = (process) => {
+export const stopProcess = (child) => {
     return new Promise((resolve) => {
-        if (!process || process.killed) {
-            resolve();
+        if (!child || !child.pid) {
+            return resolve();
+        }
+
+        const pid = child.pid;
+
+        if (process.platform === "win32") {
+            exec(`taskkill /PID ${pid} /T /F`, () => resolve());
             return;
         }
 
-        if (process.platform === 'win32') {
-            exec(`taskkill /pid ${process.pid} /T /F`, (err, stdout, stderr) => {
-                if (err) {
-                    exec(`wmic process where processid=${process.pid} delete`, (wmicErr) => {
-                        if (wmicErr) {
-                            try {
-                                process.kill(process.pid, 'SIGKILL');
-                            } catch (killErr) {
-                                console.error(`Failed to kill process ${process.pid}:`, killErr.message);
-                            }
-                        }
-                        resolve();
-                    });
-                } else {
-                    resolve();
-                }
-            });
-
-            // Timeout fallback
-            setTimeout(() => {
-                if (!process.killed) {
-                    try {
-                        process.kill('SIGKILL');
-                    } catch (err) {
-                        console.error(`Force kill failed: ${err.message}`);
-                    }
-                }
-                resolve();
-            }, 5000);
-
-        } else {
-            // Unix-like systems (Linux, macOS)
-            process.kill('SIGTERM');
-            setTimeout(() => {
-                if (!process.killed) {
-                    process.kill('SIGKILL');
-                }
-                resolve();
-            }, 3000);
+        try {
+            process.kill(pid, "SIGTERM");
+        } catch {
+            return resolve();
         }
 
-        process.killed = true;
+        // Force kill after timeout
+        setTimeout(() => {
+            try {
+                process.kill(pid, "SIGKILL");
+            } catch {}
+            resolve();
+        }, 3000);
     });
 };

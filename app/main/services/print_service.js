@@ -124,11 +124,13 @@ export default class PrintService {
      * @returns {Promise<void>}
      */
     async stop() {
-        if (this.serverProcess) {
-            await stopProcess(this.serverProcess);
-            this.serverProcess = null;
-            this.port = null;
-        }
+        if (!this.serverProcess) return;
+
+        const proc = this.serverProcess;
+        this.serverProcess = null;
+        this.port = null;
+
+        await stopProcess(proc);
     }
 
     /**
