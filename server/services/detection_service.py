@@ -24,20 +24,21 @@ class DetectionService:
             )
             return None
 
-    def _has_printer_interface(self, device):
+    def _detect_device_type(self, device):
+        """Detect the device type which is connected to System."""
         try:
             for cfg in device:
                 for intf in cfg:
                     if intf.bInterfaceClass == 0x07:
-                        return True
+                        return "printer"
         except usb.core.USBError as e:
             _logger.error(
-                "Failed to inspect USB interfaces for device %04x:%04x: %s",
+                "Failed to detect device type for device %04x:%04x: %s",
                 device.idVendor,
                 device.idProduct,
                 e,
             )
-        return False
+        return None
 
     def _get_interfaces(self, device):
         interfaces = []
@@ -66,36 +67,40 @@ class DetectionService:
             )
         return interfaces
 
-    def _normalize_printer_names(self, printers):
+    def _normalize_printer_names(self, devices):
         """
         Add a unique, user-friendly display_name for each printer.
         Example: TM-T82, TM-T82 (2), Printer, Printer (2)
         """
         seen = {}
 
-        for printer in printers:
-            product = (printer.get("product") or "").strip()
+        for device in devices:
+            if device.get("device_type") != "printer":
+                continue
+
+            product = (device.get("product") or "").strip()
             base_name = product if product and product != "Unknown" else "Printer"
 
-            key = (printer["vendor_id"], printer["product_id"], base_name)
+            key = (device["vendor_id"], device["product_id"], base_name)
 
             seen[key] = seen.get(key, 0) + 1
-            printer["display_name"] = (
+            device["display_name"] = (
                 f"{base_name} ({seen[key]})"
                 if seen[key] > 1
                 else base_name
             )
 
-    def list_printers(self):
-        printers = []
+    def list_devices(self):
+        devices_info = []
         devices = usb.core.find(find_all=True, backend=self.backend)
 
         for device in devices:
-            if not self._has_printer_interface(device):
+            device_type = self._detect_device_type(device)
+            if not device_type:
                 continue
 
             try:
-                printers.append({
+                devices_info.append({
                     "product": (
                         self._get_string(device, device.iProduct)
                         or "Unknown"
@@ -104,6 +109,7 @@ class DetectionService:
                         self._get_string(device, device.iManufacturer)
                         or "Unknown"
                     ),
+                    "device_type": device_type,
                     "vendor_id": f"{device.idVendor:04x}",
                     "product_id": f"{device.idProduct:04x}",
                     "serial_number": self._get_string(device, device.iSerialNumber),
@@ -117,5 +123,5 @@ class DetectionService:
                     e,
                 )
 
-        self._normalize_printer_names(printers)
-        return printers
+        self._normalize_printer_names(devices_info)
+        return devices_info

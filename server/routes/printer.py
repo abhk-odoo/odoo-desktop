@@ -67,7 +67,7 @@ def print_receipt(data: PrintRequest):
 @router.get("/printer", response_model=PrinterResponse)
 def list_printers():
     try:
-        printers = detector.list_printers()
+        printers = detector.list_devices()
         if printers:
             return PrinterResponse(
                 status=True,
@@ -91,7 +91,7 @@ def list_printers():
 @router.post("/print/status", response_model=PrinterResponse)
 def print_printer_status(data: PrintStatusRequest):
     """Print a status ticket for the first available printer."""
-    printers = detector.list_printers()
+    printers = detector.list_devices()
 
     if not printers or not printers[0]:
         return PrinterResponse(
